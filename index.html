@@ -755,7 +755,8 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
      today:"2026-10-20",
      pits:[{ id:"389", name:"Rodney Ball Pit", loc:"Monto", status:"Under production" | "Completed" | "Not started",
              comp:"Compliant" | "Non-compliant" | "Not yet tested", owner:"Kenneth Ball",
-             limit:5000, stockEst:5363.7, last:"2026-08-25", stock:1142 }],     // stock = stockpile on hand (t)
+             limit:5000, stockEst:5363.7, last:"2026-08-25",
+             open:5363.7 }],   // open = starting stock: stockpile = open + crushed - hauled  (or stock = stockpile on hand today)
      crush:[{ p:"389", m:"2026-08", t:512.4 }],             // tonnes crushed, one row per pit per month
      haul:[{ p:"389", m:"2026-08", t:310.2 }],              // tonnes hauled, one row per pit per month
      roads:[{ r:"Walkers Creek Road", m:"2026-08", t:310.2, n:13 }],   // tonnes hauled per road per month (n = loads, optional)
@@ -819,9 +820,13 @@ var G = (function () {
     S.CUR = parseInt(S.TODAY.slice(0, 4), 10); S.CURM = parseInt(S.TODAY.slice(5, 7), 10);
     S.valuePerT = num(P.valuePerT) || 20;
 
+    /* tidy pit status and compliance wording so small differences in capitals or spacing still count */
+    const key = v => str(v).toLowerCase().replace(/[\s_-]+/g, '');
+    const normPitStatus = v => ({ underproduction:'Under production', inproduction:'Under production', active:'Under production', producing:'Under production', completed:'Completed', complete:'Completed', closed:'Completed', notstarted:'Not started', notyetstarted:'Not started', pending:'Not started' })[key(v)] || str(v);
+    const normComp = v => ({ compliant:'Compliant', pass:'Compliant', passed:'Compliant', noncompliant:'Non-compliant', notcompliant:'Non-compliant', fail:'Non-compliant', failed:'Non-compliant', notyettested:'Not yet tested', nottested:'Not yet tested', untested:'Not yet tested', '':'' })[key(v)] ?? str(v);
     S.pits = (P.pits || []).map(p => ({
-      id:str(p.id), name:str(p.name) || ('Pit ' + str(p.id)), loc:str(p.loc), status:str(p.status), comp:str(p.comp) || 'Not yet tested',
-      owner:str(p.owner), limit:num(p.limit), stockEst:num(p.stockEst), last:isoOf(p.last), stock:num(p.stock)
+      id:str(p.id), name:str(p.name) || ('Pit ' + str(p.id)), loc:str(p.loc), status:normPitStatus(p.status), comp:normComp(p.comp) || 'Not yet tested',
+      owner:str(p.owner), limit:num(p.limit), stockEst:num(p.stockEst), last:isoOf(p.last), stock:num(p.stock), open:num(p.open)
     })).filter(p => p.id);
 
     const ym = v => { const i = isoOf(v); return i ? { y:parseInt(i.slice(0, 4), 10), m:parseInt(i.slice(5, 7), 10) } : null; };
@@ -839,7 +844,9 @@ var G = (function () {
     S.HAUL.forEach(e => { if (S.HMT[e.y]) S.HMT[e.y][e.m - 1] += e.t; });
     /* opening stock: if a pit sends its stockpile on hand today, the logs' running total is lined up to it */
     S.OFF = {}; S.OFFT = 0;
-    S.pits.forEach(p => { if (p.stock == null) return; const calc = sum(S.CRUSH.filter(e => e.pit === p.id).map(e => e.t)) - sum(S.HAUL.filter(e => e.pit === p.id).map(e => e.t)); S.OFF[p.id] = p.stock - calc; S.OFFT += S.OFF[p.id]; });
+    /* open = starting stock (e.g. Best Available Stock Estimate): stockpile = open + crushed - hauled */
+    S.pits.forEach(p => { if (p.open != null) { S.OFF[p.id] = p.open; S.OFFT += p.open; } });
+    S.pits.forEach(p => { if (p.open != null || p.stock == null) return; const calc = sum(S.CRUSH.filter(e => e.pit === p.id).map(e => e.t)) - sum(S.HAUL.filter(e => e.pit === p.id).map(e => e.t)); S.OFF[p.id] = p.stock - calc; S.OFFT += S.OFF[p.id]; });
     let run = S.OFFT; S.YEARS.forEach(y => { S.SMT[y] = []; for (let m = 0; m < 12; m++) { run += S.PMT[y][m] - S.HMT[y][m]; S.SMT[y].push(y === S.CUR && m >= S.CURM ? null : run); } });
 
     S.recent = (P.recent || []).map(r => ({ d:isoOf(r.d), pit:str(r.p), road:str(r.r), t:num(r.t) || 0 })).filter(r => r.d).sort((a, b) => D(b.d) - D(a.d));
@@ -1146,8 +1153,8 @@ var G = (function () {
     let h = (NODATA ? '<div class="panel nodata"><div class="panel-title">No data for ' + y + '</div><div class="panel-sub" style="margin-top:4px;">No crushing or haulage has been recorded in ' + y + '. Stockpile, bookings and alerts below still show the live position.</div></div>' : '') +
       '<div class="kpi-row six">' +
       kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodYr, limAll) + '% of the annual limit' : '') : (limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
-      kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
-      kpi(y === S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y === S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : 'Crushed less hauled, all years') : 'Crushed less hauled, all years', '', 'stack', 'v') +
+      kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', (S.hasLoads ? fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' : 'To ') + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
+      kpi(y === S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y === S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years')) : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years'), '', 'stack', 'v') +
       (B ? kpi('Open bookings', String(openB.length), '', fmtN(outstanding) + ' t outstanding' + (overN ? ' · <b style="color:var(--red);">' + overN + ' over-allocated</b>' : ''), overN ? 'warn' : '', 'cal', 'b')
          : kpi('Open bookings', '–', '', 'No bookings data sent', '', 'cal', 'b')) +
       kpi('Pits over limit', String(overLim.length), 'this year', near.length + ' more within 5% of the limit', overLim.length ? 'warn' : '', 'gauge', 'a') +
@@ -1182,7 +1189,7 @@ var G = (function () {
     const mg = {}; S.ROADS.filter(e => e.y === y && e.m === mm).forEach(e => { mg[e.road] = (mg[e.road] || 0) + e.t; });
     const topR = Object.keys(mg).map(k => ({ k:k, t:mg[k] })).sort((a, b) => b.t - a.t).slice(0, 5);
     const pHaul = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Haulage in ' + MONTH_FULL[mm - 1] + ' ' + y + '</div><div class="panel-sub">Where the gravel went</div></div></div>' +
-      '<div class="mini-row"><div><b>' + fmtN(thisM) + ' t</b><span>hauled</span></div><div><b>' + fmtN(loadsWhere(e => e.y === y && e.m === mm)) + '</b><span>loads</span></div><div><b style="color:' + (thisM >= prevM ? C.g : C.a) + ';">' + (prevM ? (thisM >= prevM ? '+' : '') + Math.round((thisM - prevM) / prevM * 100) + '%' : '-') + '</b><span>vs last month</span></div></div>' +
+      '<div class="mini-row"><div><b>' + fmtN(thisM) + ' t</b><span>hauled</span></div>' + (S.hasLoads ? '<div><b>' + fmtN(loadsWhere(e => e.y === y && e.m === mm)) + '</b><span>loads</span></div>' : '<div><b>' + Object.keys(mg).length + '</b><span>roads and jobs</span></div>') + '<div><b style="color:' + (thisM >= prevM ? C.g : C.a) + ';">' + (prevM ? (thisM >= prevM ? '+' : '') + Math.round((thisM - prevM) / prevM * 100) + '%' : '-') + '</b><span>vs last month</span></div></div>' +
       (topR.length ? topR.map(r => hbar(r.k, r.t, topR[0].t, C.b, fmtN(r.t) + ' t')).join('') : '<div class="cell-muted" style="padding:8px 0;">No haulage logged this month.</div>') +
       ((ALL || y === S.CUR) && S.recent.length ? '<div class="sub-head">Latest deliveries</div>' + S.recent.slice(0, 4).map(r => '<div class="recent"><span>' + fmt(r.d) + '</span><span>' + esc(pitOf(r.pit).name) + (r.road ? ' to ' + esc(r.road) : '') + '</span><b>' + r.t.toFixed(2) + ' t</b></div>').join('') : '') + '</div>';
     if (B) {
@@ -1207,7 +1214,7 @@ var G = (function () {
     h += '<div class="panel"><div class="panel-head"><div><div class="panel-title">Pits in production</div><div class="panel-sub">Used this calendar year, stock on hand, reservations and last activity</div></div></div><div class="table-scroll scrollbox tall"><table><thead><tr><th>Pit</th><th>Owner</th><th>Used in ' + y + '</th><th>' + (ALL ? 'Crushed, all time (t)' : 'Crushed (t)') + '</th><th title="Drone survey estimate. It can exceed the limit.">Stock est. (t)</th><th>Stockpile (t)</th><th>Reserved (t)</th><th>Last production</th><th>Compliance</th></tr></thead><tbody>' +
       rowsP.map(p => {
         const t = hasBookings(p.id) ? tot(p.id) : null, li = p.last, stl = p.status === 'Under production' && li && D(S.TODAY) - D(li) > 21;
-        return '<tr><td><span class="cell-strong">' + esc(p.name) + ' · ' + esc(p.id) + '</span><div class="v9-sub">' + esc([p.loc, p.status].filter(Boolean).join(' · ')) + '</div></td><td>' + esc(p.owner) + '</td><td>' + capGauge(p.id, p.limit, y) + '</td><td>' + fmtN(ALL ? sum(S.YEARS.map(yy => prodY(yy, p.id))) : prodY(y, p.id)) + '</td><td class="cell-muted">' + (p.stockEst == null ? '-' : fmtN(p.stockEst)) + '</td><td>' + (p.stock != null ? fmtN(p.stock) : '<span class="cell-muted">-</span>') + '</td><td>' + (t ? fmtN(t.reserved) + (t.over > 0 ? '<div class="cap-over">+' + fmtN(t.over) + ' t ' + overLabel() + '</div>' : '') : '<span class="cell-muted">-</span>') + '</td><td style="white-space:nowrap;' + (stl ? 'color:var(--amber);font-weight:700;' : '') + '">' + (li ? fmt(li) : '<span class="cell-muted">-</span>') + '</td><td>' + compPill(p.comp) + '</td></tr>';
+        return '<tr><td><span class="cell-strong">' + esc(p.name) + ' · ' + esc(p.id) + '</span><div class="v9-sub">' + esc([p.loc, p.status].filter(Boolean).join(' · ')) + '</div></td><td>' + esc(p.owner) + '</td><td>' + capGauge(p.id, p.limit, y) + '</td><td>' + fmtN(ALL ? sum(S.YEARS.map(yy => prodY(yy, p.id))) : prodY(y, p.id)) + '</td><td class="cell-muted">' + (p.stockEst == null ? '-' : fmtN(p.stockEst)) + '</td><td>' + (p.stock != null ? fmtN(p.stock) : (S.OFF[p.id] != null ? fmtN(G.stockAtP(S.CUR, p.id)) : '<span class="cell-muted">-</span>')) + '</td><td>' + (t ? fmtN(t.reserved) + (t.over > 0 ? '<div class="cap-over">+' + fmtN(t.over) + ' t ' + overLabel() + '</div>' : '') : '<span class="cell-muted">-</span>') + '</td><td style="white-space:nowrap;' + (stl ? 'color:var(--amber);font-weight:700;' : '') + '">' + (li ? fmt(li) : '<span class="cell-muted">-</span>') + '</td><td>' + compPill(p.comp) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       (B ? '<div class="bk-legend" style="margin-top:10px;"><span><i style="background:var(--violet)"></i>Used this calendar year</span><span><i style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.7) 0 2px,var(--violet) 2px 4px)"></i>Reserved by open bookings</span><span><i style="background:repeating-linear-gradient(45deg,#C24545 0 2px,#F5D5D5 2px 4px);border:1px solid #C24545"></i>' + (S.overRule === 'hauled' ? 'Hauled over booking' : 'Reserved, not yet crushed') + '</span></div>' : '') + '</div>';
     root.innerHTML = h;
