@@ -811,7 +811,7 @@ var G = (function () {
     if (P && P.__error) return { error:'The data sent from Power Apps could not be read. Check the JSON in the Src formula.' };
     if (!P && !demo) return { waiting:true };
     S.demo = !P; P = P || demo;
-    S.view = { year:P.year, years:P.years, lfl:P.lfl === true || String(P.lfl).toLowerCase() === 'true' };
+    S.view = { allTime:P.allTime, year:P.year, years:P.years, lfl:P.lfl === true || String(P.lfl).toLowerCase() === 'true' };
 
     const now = new Date();
     S.TODAY = isoOf(P.today) || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'));
@@ -1121,7 +1121,7 @@ var G = (function () {
   const { MON, MONTH_FULL, C, S, $, sum, D, fmt, fmtN, esc, regPits, pitOf, prodM, haulM, prodY, monthsAvail, stockAt, loadsWhere,
           limitAll, activeRows, pctOf, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge, colChart, donut, spark, legend, hbar,
           pill, compPill, kpi, overLabel, alerts, alertRow } = G;
-  let YEAR = null;
+  let YEAR = null, ALL = false;
 
 
   function render() {
@@ -1129,19 +1129,22 @@ var G = (function () {
     if (YEAR == null || S.YEARS.indexOf(YEAR) < 0) YEAR = S.CUR;
     const df = $('demo-flag'); if (df) df.hidden = !S.demo;
 
-    const y = YEAR, pm = prodM(y), hm = haulM(y), prod = sum(pm), haul = sum(hm), mAv = monthsAvail(y);
+    const y = ALL ? S.CUR : YEAR, pm = prodM(y), hm = haulM(y), mAv = monthsAvail(y);
+    /* totals: one calendar year, or every year in the data for all time. Limits are annual, so those parts use the current year */
+    const YS = ALL ? S.YEARS : [y], prodByY = YS.map(a => sum(prodM(a))), haulByY = YS.map(a => sum(haulM(a)));
+    const prod = sum(prodByY), haul = sum(haulByY), prodYr = sum(pm), span = S.YEARS[0] + (S.YEARS.length > 1 ? ' to ' + S.YEARS[S.YEARS.length - 1] : '');
     const R = regPits(), limAll = limitAll(), act = activeRows();
     const B = bkd(), openB = B ? B.BOOKINGS.filter(isOpen) : [], outstanding = B ? sum(openB.map(bal)) : 0;
     const bkPits = B ? Object.keys(B.PITS) : [], tot = id => pitTotals(id);
     const reserved = B ? sum(bkPits.map(id => tot(id).reserved)) : 0, overT = B ? sum(bkPits.map(id => tot(id).over)) : 0, overN = B ? openB.filter(b => cover(b).kind !== 'ok').length : 0;
     const stock = stockAt(y), AL = alerts(), crit = AL.filter(a => a.sev === 'crit').length;
     const overLim = R.filter(p => p.limit && prodY(y, p.id) > p.limit), near = R.filter(p => p.limit && prodY(y, p.id) <= p.limit && prodY(y, p.id) / p.limit >= 0.95);
-    const roadsN = new Set(S.ROADS.filter(e => e.y === y).map(e => e.road)).size;
+    const roadsN = new Set(S.ROADS.filter(e => ALL || e.y === y).map(e => e.road)).size;
     const pad = a => a.slice(0, mAv).concat(new Array(12 - mAv).fill(0));
 
     let h = '<div class="kpi-row six">' +
-      kpi('Crushed ' + y, fmtN(prod), 't', limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded', '', 'prod', 'v', spark(pad(pm), C.v)) +
-      kpi('Hauled ' + y, fmtN(haul), 't', fmtN(loadsWhere(e => e.y === y)) + ' loads to ' + roadsN + ' roads and jobs', '', 'truck', 'g', spark(pad(hm), C.b)) +
+      kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodYr, limAll) + '% of the annual limit' : '') : (limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
+      kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
       kpi(y === S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y === S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : 'Crushed less hauled, all years') : 'Crushed less hauled, all years', '', 'stack', 'v') +
       (B ? kpi('Open bookings', String(openB.length), '', fmtN(outstanding) + ' t outstanding' + (overN ? ' · <b style="color:var(--red);">' + overN + ' over-allocated</b>' : ''), overN ? 'warn' : '', 'cal', 'b')
          : kpi('Open bookings', '–', '', 'No bookings data sent', '', 'cal', 'b')) +
@@ -1153,11 +1156,14 @@ var G = (function () {
     const bar = (label, v, lim, color) => { const p = pctOf(v, lim) || 0; return '<div style="margin-bottom:18px;"><div style="display:flex;justify-content:space-between;gap:12px;font-size:12.5px;margin-bottom:8px;"><b style="color:var(--ink);">' + label + '</b><span style="color:var(--ink-soft);white-space:nowrap;"><b>' + fmtN(v) + '</b> of ' + fmtN(lim) + ' t · <b style="color:' + (p > 100 ? C.r : 'var(--ink)') + ';">' + p + '%</b></span></div><div class="progress-track" style="height:18px;border-radius:10px;"><div class="progress-fill" style="width:' + Math.min(100, p) + '%;background:' + color + ';border-radius:10px;"></div></div></div>'; };
     const parts = [['Under production', R.filter(p => p.status === 'Under production').length, C.v], ['Completed', R.filter(p => p.status === 'Completed').length, C.g], ['Not started', R.filter(p => p.status === 'Not started').length, C.grey]];
     const pAnnual = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Annual extraction progress</div><div class="panel-sub">Tonnes crushed in calendar year ' + y + ' against the sum of the pit limits</div></div></div>' +
-      bar('Crushed against the annual limit for all open pits (' + R.filter(p => p.limit).length + ')', prod, limAll, 'linear-gradient(90deg,' + C.vm + ',' + C.v + ')') +
+      bar('Crushed against the annual limit for all open pits (' + R.filter(p => p.limit).length + ')', prodYr, limAll, 'linear-gradient(90deg,' + C.vm + ',' + C.v + ')') +
       '<div style="display:flex;align-items:center;gap:18px;margin-top:6px;">' + donut(parts.map(p => ({ v:p[1], color:p[2], label:p[0] })), 92) + '<div style="flex:1;">' + parts.map(p => '<div class="stat-line"><span><i class="legend-dot" style="background:' + p[2] + ';display:inline-block;margin-right:7px;"></i>' + p[0] + '</span><b>' + p[1] + '</b></div>').join('') + '</div></div>' +
       (top && top.limit && limAll && top.limit / limAll > 0.25 ? '<div class="v9-note">Check: ' + esc(top.name) + ' carries a ' + fmtN(top.limit) + ' t limit, ' + Math.round(top.limit / limAll * 100) + '% of the total.</div>' : '') + '</div>';
-    const pMonthly = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by month, ' + y + '</div><div class="panel-sub">Tonnes per month</div></div></div>' +
-      colChart(MON, [{ name:'Crushed', color:C.v, vals:pm.map((v, i) => (i < mAv ? v : null)) }, { name:'Hauled', color:C.b, vals:hm.map((v, i) => (i < mAv ? v : null)) }], { h:250, tipCat:i => MONTH_FULL[i] + ' ' + y }) +
+    const pMonthly = (ALL
+      ? '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by year</div><div class="panel-sub">Tonnes per calendar year · ' + S.CUR + ' is year to date</div></div></div>' +
+        colChart(S.YEARS.map(String), [{ name:'Crushed', color:C.v, vals:prodByY }, { name:'Hauled', color:C.b, vals:haulByY }], { h:250, tipCat:i => String(S.YEARS[i]) + (S.YEARS[i] === S.CUR ? ' (to date)' : '') })
+      : '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by month, ' + y + '</div><div class="panel-sub">Tonnes per month</div></div></div>' +
+        colChart(MON, [{ name:'Crushed', color:C.v, vals:pm.map((v, i) => (i < mAv ? v : null)) }, { name:'Hauled', color:C.b, vals:hm.map((v, i) => (i < mAv ? v : null)) }], { h:250, tipCat:i => MONTH_FULL[i] + ' ' + y })) +
       legend([['Tonnes crushed', C.v], ['Tonnes hauled', C.b]]) + '</div>';
 
     /* alerts and pit capacity ranking */
@@ -1176,7 +1182,7 @@ var G = (function () {
     const pHaul = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Haulage in ' + MONTH_FULL[mm - 1] + ' ' + y + '</div><div class="panel-sub">Where the gravel went</div></div></div>' +
       '<div class="mini-row"><div><b>' + fmtN(thisM) + ' t</b><span>hauled</span></div><div><b>' + fmtN(loadsWhere(e => e.y === y && e.m === mm)) + '</b><span>loads</span></div><div><b style="color:' + (thisM >= prevM ? C.g : C.a) + ';">' + (prevM ? (thisM >= prevM ? '+' : '') + Math.round((thisM - prevM) / prevM * 100) + '%' : '-') + '</b><span>vs last month</span></div></div>' +
       (topR.length ? topR.map(r => hbar(r.k, r.t, topR[0].t, C.b, fmtN(r.t) + ' t')).join('') : '<div class="cell-muted" style="padding:8px 0;">No haulage logged this month.</div>') +
-      (y === S.CUR && S.recent.length ? '<div class="sub-head">Latest deliveries</div>' + S.recent.slice(0, 4).map(r => '<div class="recent"><span>' + fmt(r.d) + '</span><span>' + esc(pitOf(r.pit).name) + (r.road ? ' to ' + esc(r.road) : '') + '</span><b>' + r.t.toFixed(2) + ' t</b></div>').join('') : '') + '</div>';
+      ((ALL || y === S.CUR) && S.recent.length ? '<div class="sub-head">Latest deliveries</div>' + S.recent.slice(0, 4).map(r => '<div class="recent"><span>' + fmt(r.d) + '</span><span>' + esc(pitOf(r.pit).name) + (r.road ? ' to ' + esc(r.road) : '') + '</span><b>' + r.t.toFixed(2) + ' t</b></div>').join('') : '') + '</div>';
     if (B) {
       const nextB = openB.slice().sort((a, b) => D(a.req || a.on) - D(b.req || b.on)).slice(0, 5), free = sum(bkPits.map(id => tot(id).free));
       const hauledRule = S.overRule === 'hauled';
@@ -1196,10 +1202,10 @@ var G = (function () {
 
     /* pits table */
     const rowsP = act.slice().sort((a, b) => (b.limit ? prodY(y, b.id) / b.limit : 0) - (a.limit ? prodY(y, a.id) / a.limit : 0));
-    h += '<div class="panel"><div class="panel-head"><div><div class="panel-title">Pits in production</div><div class="panel-sub">Used this calendar year, stock on hand, reservations and last activity</div></div></div><div class="table-scroll scrollbox tall"><table><thead><tr><th>Pit</th><th>Owner</th><th>Used in ' + y + '</th><th>Crushed (t)</th><th title="Drone survey estimate. It can exceed the limit.">Stock est. (t)</th><th>Stockpile (t)</th><th>Reserved (t)</th><th>Last production</th><th>Compliance</th></tr></thead><tbody>' +
+    h += '<div class="panel"><div class="panel-head"><div><div class="panel-title">Pits in production</div><div class="panel-sub">Used this calendar year, stock on hand, reservations and last activity</div></div></div><div class="table-scroll scrollbox tall"><table><thead><tr><th>Pit</th><th>Owner</th><th>Used in ' + y + '</th><th>' + (ALL ? 'Crushed, all time (t)' : 'Crushed (t)') + '</th><th title="Drone survey estimate. It can exceed the limit.">Stock est. (t)</th><th>Stockpile (t)</th><th>Reserved (t)</th><th>Last production</th><th>Compliance</th></tr></thead><tbody>' +
       rowsP.map(p => {
         const t = hasBookings(p.id) ? tot(p.id) : null, li = p.last, stl = p.status === 'Under production' && li && D(S.TODAY) - D(li) > 21;
-        return '<tr><td><span class="cell-strong">' + esc(p.name) + ' · ' + esc(p.id) + '</span><div class="v9-sub">' + esc([p.loc, p.status].filter(Boolean).join(' · ')) + '</div></td><td>' + esc(p.owner) + '</td><td>' + capGauge(p.id, p.limit, y) + '</td><td>' + fmtN(prodY(y, p.id)) + '</td><td class="cell-muted">' + (p.stockEst == null ? '-' : fmtN(p.stockEst)) + '</td><td>' + (p.stock != null ? fmtN(p.stock) : '<span class="cell-muted">-</span>') + '</td><td>' + (t ? fmtN(t.reserved) + (t.over > 0 ? '<div class="cap-over">+' + fmtN(t.over) + ' t ' + overLabel() + '</div>' : '') : '<span class="cell-muted">-</span>') + '</td><td style="white-space:nowrap;' + (stl ? 'color:var(--amber);font-weight:700;' : '') + '">' + (li ? fmt(li) : '<span class="cell-muted">-</span>') + '</td><td>' + compPill(p.comp) + '</td></tr>';
+        return '<tr><td><span class="cell-strong">' + esc(p.name) + ' · ' + esc(p.id) + '</span><div class="v9-sub">' + esc([p.loc, p.status].filter(Boolean).join(' · ')) + '</div></td><td>' + esc(p.owner) + '</td><td>' + capGauge(p.id, p.limit, y) + '</td><td>' + fmtN(ALL ? sum(S.YEARS.map(yy => prodY(yy, p.id))) : prodY(y, p.id)) + '</td><td class="cell-muted">' + (p.stockEst == null ? '-' : fmtN(p.stockEst)) + '</td><td>' + (p.stock != null ? fmtN(p.stock) : '<span class="cell-muted">-</span>') + '</td><td>' + (t ? fmtN(t.reserved) + (t.over > 0 ? '<div class="cap-over">+' + fmtN(t.over) + ' t ' + overLabel() + '</div>' : '') : '<span class="cell-muted">-</span>') + '</td><td style="white-space:nowrap;' + (stl ? 'color:var(--amber);font-weight:700;' : '') + '">' + (li ? fmt(li) : '<span class="cell-muted">-</span>') + '</td><td>' + compPill(p.comp) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       (B ? '<div class="bk-legend" style="margin-top:10px;"><span><i style="background:var(--violet)"></i>Used this calendar year</span><span><i style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.7) 0 2px,var(--violet) 2px 4px)"></i>Reserved by open bookings</span><span><i style="background:repeating-linear-gradient(45deg,#C24545 0 2px,#F5D5D5 2px 4px);border:1px solid #C24545"></i>' + (S.overRule === 'hauled' ? 'Hauled over booking' : 'Reserved, not yet crushed') + '</span></div>' : '') + '</div>';
     root.innerHTML = h;
@@ -1210,7 +1216,10 @@ var G = (function () {
     if (r.waiting) { G.showWaiting(); return; }
     if (r.error) { G.showError(r.error); return; }
     /* calendar year comes from a Power Apps control via the payload (year or years); default is the current year */
-    const v = S.view || {}, want = parseInt(String(v.year != null ? v.year : (v.years != null ? v.years : '')).split(/[,;\s]+/).pop(), 10);
+    const v = S.view || {}, raw = String(v.year != null ? v.year : (v.years != null ? v.years : '')).trim();
+    /* all time: year "all", or allTime true (e.g. gblAllTime) */
+    ALL = /^(all|all time)$/i.test(raw) || v.allTime === true || String(v.allTime).toLowerCase() === 'true';
+    const want = parseInt(raw.split(/[,;\s]+/).pop(), 10);
     YEAR = S.YEARS.indexOf(want) >= 0 ? want : S.CUR;
     render();
   }
