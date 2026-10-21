@@ -715,6 +715,13 @@ tr.sel-row td{background:var(--violet-tint);}
   .att-x{cursor:pointer;font-size:20px;line-height:1;color:var(--muted);padding:2px 6px;border-radius:6px;}
   .att-x:hover{background:var(--line-soft);color:var(--ink);}
   .panel.nodata{margin-bottom:16px;border:1px solid #F3D9AE;background:#FFFBF3;}
+  .build-tag{margin-top:18px;font-size:10.5px;color:var(--muted);text-align:right;opacity:.8;}
+  /* info icon beside titles */
+  .info-i{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border-radius:50%;
+          border:1px solid #B9C0D4;color:#7A839B;font:700 10px/1 'Segoe UI',-apple-system,Arial,sans-serif;font-style:normal;cursor:help;vertical-align:2px;text-transform:none;letter-spacing:0;}
+  .info-i:hover,.info-i:focus{border-color:var(--violet);color:var(--violet);background:var(--violet-tint);outline:none;}
+  .kpi-label .info-i{vertical-align:1px;}
+  .gtip{max-width:340px;}
   .g2.one{grid-template-columns:1fr;}
   html::-webkit-scrollbar{width:10px;}
   html::-webkit-scrollbar-thumb{background:#CBD1E3;border-radius:6px;border:2px solid transparent;background-clip:padding-box;}
@@ -779,6 +786,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
    ========================================================================== */
 var G = (function () {
   'use strict';
+  const BUILD = '21 Oct 19:25';
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const MATS = ['3.5 Roadbase', '150 Minus'];
@@ -813,6 +821,7 @@ var G = (function () {
     if (P && P.__error) return { error:'The data sent from Power Apps could not be read. Check the JSON in the Src formula.' };
     if (!P && !demo) return { waiting:true };
     S.demo = !P; P = P || demo;
+    S.sent = { year:P.year, years:P.years, allTime:P.allTime };
     S.view = { allTime:P.allTime, year:P.year, years:P.years, lfl:P.lfl === true || String(P.lfl).toLowerCase() === 'true' };
 
     const now = new Date();
@@ -837,7 +846,9 @@ var G = (function () {
     else S.ROADS = S.HAUL.filter(e => e.road != null);
     S.hasLoads = S.ROADS.some(e => e.n != null);
 
-    S.YEARS = Array.from(new Set(S.CRUSH.map(e => e.y).concat(S.HAUL.map(e => e.y), S.ROADS.map(e => e.y), [S.CUR]))).filter(y => y <= S.CUR).sort((a, b) => a - b);
+    /* years asked for by the app (year / years) are kept even when they have no records, so the filter always applies */
+    const asked = String(P.years != null && P.years !== '' ? P.years : (P.year != null ? P.year : '')).split(/[,;\s]+/).map(Number).filter(y => y >= 1990 && y <= 2100 && !(P.allTime === true || String(P.allTime).toLowerCase() === 'true'));
+    S.YEARS = Array.from(new Set(S.CRUSH.map(e => e.y).concat(S.HAUL.map(e => e.y), S.ROADS.map(e => e.y), [S.CUR]).filter(y => y <= S.CUR).concat(asked))).sort((a, b) => a - b);
     S.PMT = {}; S.HMT = {}; S.SMT = {};
     S.YEARS.forEach(y => { S.PMT[y] = new Array(12).fill(0); S.HMT[y] = new Array(12).fill(0); });
     S.CRUSH.forEach(e => { if (S.PMT[e.y]) S.PMT[e.y][e.m - 1] += e.t; });
@@ -847,7 +858,7 @@ var G = (function () {
     /* open = starting stock (e.g. Best Available Stock Estimate): stockpile = open + crushed - hauled */
     S.pits.forEach(p => { if (p.open != null) { S.OFF[p.id] = p.open; S.OFFT += p.open; } });
     S.pits.forEach(p => { if (p.open != null || p.stock == null) return; const calc = sum(S.CRUSH.filter(e => e.pit === p.id).map(e => e.t)) - sum(S.HAUL.filter(e => e.pit === p.id).map(e => e.t)); S.OFF[p.id] = p.stock - calc; S.OFFT += S.OFF[p.id]; });
-    let run = S.OFFT; S.YEARS.forEach(y => { S.SMT[y] = []; for (let m = 0; m < 12; m++) { run += S.PMT[y][m] - S.HMT[y][m]; S.SMT[y].push(y === S.CUR && m >= S.CURM ? null : run); } });
+    let run = S.OFFT; S.YEARS.forEach(y => { S.SMT[y] = []; for (let m = 0; m < 12; m++) { run += S.PMT[y][m] - S.HMT[y][m]; S.SMT[y].push(y > S.CUR || (y === S.CUR && m >= S.CURM) ? null : run); } });
 
     S.recent = (P.recent || []).map(r => ({ d:isoOf(r.d), pit:str(r.p), road:str(r.r), t:num(r.t) || 0 })).filter(r => r.d).sort((a, b) => D(b.d) - D(a.d));
 
@@ -886,7 +897,7 @@ var G = (function () {
   const prodY = (y, id) => sum(prodM(y, id));
   const haulY = (y, f) => sum(haulM(y, f));
   const ytd = id => prodY(S.CUR, id);
-  const monthsAvail = y => (y < S.CUR ? 12 : S.CURM);
+  const monthsAvail = y => (y === S.CUR ? S.CURM : 12);   /* past and future (forecast) years: all 12 months */
   const stockAt = y => S.OFFT + sum(S.CRUSH.filter(e => e.y <= y).map(e => e.t)) - sum(S.HAUL.filter(e => e.y <= y).map(e => e.t));
   const stockAtP = (y, id) => (S.OFF[id] || 0) + sum(S.CRUSH.filter(e => e.pit === id && e.y <= y).map(e => e.t)) - sum(S.HAUL.filter(e => e.pit === id && e.y <= y).map(e => e.t));
   /* loads: the real count when Power Apps sends it, otherwise about 24.6 t a load as in the original */
@@ -1083,6 +1094,15 @@ var G = (function () {
   const alertRow = a => '<div class="activity-row"><div class="activity-icon ' + (a.sev === 'crit' ? 'crit' : 'warn') + '">' + icon('alert') + '</div><div class="activity-body"><div class="activity-title">' + esc(a.title) + '</div><div class="activity-meta">' + esc(a.meta) + '</div></div><div class="activity-time">' + a.when + '</div></div>';
 
   /* ---------- hover tooltip: any element with data-tip ("Title|row|row") ---------- */
+  /* info icons: map of [title starts with, explanation]; lines separated by | */
+  function addInfo(root, map) {
+    const put = (el, txt) => { if (el.querySelector('.info-i')) return; const t = el.textContent.trim(); const hit = map.filter(m => t.toLowerCase().indexOf(m[0].toLowerCase()) === 0).sort((x, y) => y[0].length - x[0].length)[0]; if (!hit) return;   /* longest match wins */
+      const i = document.createElement('span'); i.className = 'info-i'; i.setAttribute('tabindex', '0'); i.setAttribute('role', 'button'); i.setAttribute('aria-label', 'How this is calculated');
+      i.setAttribute('data-tip', 'How this works|' + hit[1]); i.textContent = 'i';
+      const badge = el.querySelector('.attention-badge, .illus'); if (badge) el.insertBefore(i, badge); else el.appendChild(i); };
+    root.querySelectorAll('.panel-title').forEach(el => put(el));
+    root.querySelectorAll('.kpi-label').forEach(el => put(el));
+  }
   function initTips() {
     const tip = document.createElement('div'); tip.className = 'gtip'; document.body.appendChild(tip);
     let cur = null;
@@ -1109,9 +1129,26 @@ var G = (function () {
     document.addEventListener('mouseout', e => { if (!e.relatedTarget) hideTip(); });
     window.addEventListener('blur', hideTip);
     window.addEventListener('scroll', hideTip, true);
-    document.addEventListener('click', hideTip, true);
+    document.addEventListener('click', e => {
+      const i = e.target.closest ? e.target.closest('.info-i') : null;
+      if (!i) { hideTip(); return; }
+      e.stopPropagation();
+      const parts = i.getAttribute('data-tip').split('|');
+      tip.innerHTML = '<b>' + esc(parts[0]) + '</b>' + parts.slice(1).map(p => '<div>' + esc(p) + '</div>').join('');
+      const r = i.getBoundingClientRect(); tip.style.opacity = 1;
+      const w = tip.getBoundingClientRect().width, h = tip.getBoundingClientRect().height;
+      let x = r.left, y = r.bottom + 8; if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6; if (y + h > window.innerHeight - 6) y = r.top - h - 8;
+      tip.style.transform = 'translate(' + Math.max(6, x) + 'px,' + Math.max(6, y) + 'px)';
+    }, true);
   }
 
+  /* small diagnostic line at the bottom: build version and what the app sent */
+  function footer(showing) {
+    let f = document.getElementById('build-tag');
+    if (!f) { f = document.createElement('div'); f.id = 'build-tag'; f.className = 'build-tag'; (document.querySelector('.main') || document.body).appendChild(f); }
+    const sv = v => (v === undefined ? 'not sent' : v === null || v === '' ? 'blank' : String(v));
+    f.textContent = 'Build ' + BUILD + ' · year sent: ' + sv(S.sent && (S.sent.years != null ? S.sent.years : S.sent.year)) + ' · all time sent: ' + sv(S.sent && S.sent.allTime) + ' · showing: ' + showing + ' · loaded ' + new Date().toLocaleTimeString('en-AU');
+  }
   function showWaiting() {
     const root = document.getElementById('an-root') || document.getElementById('dash-root'); const f = document.getElementById('demo-flag'); if (f) f.hidden = true; if (!root) return;
     root.innerHTML = '<div class="panel"><div class="panel-title">Waiting for data from Power Apps</div><div class="panel-sub" style="margin-top:6px;">No data has been sent to this page yet. In Power Apps, check that the control\'s Src ends with # followed by the EncodeUrl(JSON(...)) data.</div></div>';
@@ -1120,7 +1157,7 @@ var G = (function () {
 
   return { MON, MONTH_FULL, MATS, EXPIRY_DAYS, C, S, $, sum, D, fmt, fmtN, money, esc, load, regPits, pitOf, prodM, haulM, prodY, haulY, ytd, monthsAvail, stockAt, stockAtP,
            loadsOf, loadsWhere, limitAll, activeRows, pctOf, elapsedPct, delta, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge,
-           colChart, lineChart, donut, spark, legend, hbar, pill, compPill, icon, kpi, illus, overLabel, alerts, alertRow, initTips, showError, showWaiting };
+           colChart, lineChart, donut, spark, legend, hbar, pill, compPill, icon, kpi, illus, overLabel, alerts, alertRow, initTips, showError, showWaiting, footer, addInfo };
 })();
 
 </script>
@@ -1133,6 +1170,23 @@ var G = (function () {
   let YEAR = null, ALL = false, NODATA = false;
 
 
+
+  const INFO = [
+    ['Crushed', 'Tonnes Produced from the Crushing Production Log for the chosen calendar year (or all time).|% = tonnes crushed this year ÷ the sum of every pit\'s Extraction Limit (t).|The small bars show each month (or each year for all time).'],
+    ['Hauled', 'Tonnes Removed from the Removal & Haulage Log for the chosen year (or all time).|Roads and jobs = how many different Road Names had haulage.'],
+    ['Stockpile', 'Best Available Stock Estimate + all tonnes crushed − all tonnes hauled, up to today (or 31 Dec of a past year).'],
+    ['Open bookings', 'Bookings with status In progress or Confirmed. Live, not filtered by year.|Outstanding = Booked Tonnes − Tonnes Removed for those bookings.|Over-allocated = bookings where Tonnes Removed is above Booked Tonnes.'],
+    ['Pits over limit', 'Pits whose tonnes crushed in the year are above their Extraction Limit (t).|Within 5% = between 95% and 100% of the limit.'],
+    ['Alerts', 'Count of the items in Alerts and issues: critical (red) and to watch (amber). Live, not filtered by year.'],
+    ['Alerts and issues', 'Live checks, not filtered by year:|Pits over or within 5% of their limit · non-compliant lots · bookings hauled over the booked tonnes · deeds awaiting signing · royalties ready to pay or overdue · licences ending within 90 days · owner issues · pits under production with no crushing for 21+ days.'],
+    ['Annual extraction progress', 'Tonnes crushed in the calendar year ÷ the sum of every pit\'s Extraction Limit (t).|Donut = number of pits by Status (Under production, Completed, Not started).|A Check note appears if one pit holds more than 25% of all limits.'],
+    ['Crushed and hauled by month', 'Tonnes Produced and Tonnes Removed per calendar month in the chosen year.'],
+    ['Crushed and hauled by year', 'Tonnes Produced and Tonnes Removed per calendar year. The current year is to date.'],
+    ['Pit capacity', 'Each pit\'s tonnes crushed in the year ÷ its Extraction Limit (t), highest first.|Green 95–100%, amber under 95%, red over 100%. Resets every 1 January.'],
+    ['Bookings', 'Open bookings (In progress or Confirmed), soonest Requested By date first. Live, not filtered by year.|Shows Tonnes Removed of Booked Tonnes; "Over by" when more has been hauled than booked.|Free to book = stockpile on hand − outstanding booked tonnes.'],
+    ['Haulage in', 'Tonnes Removed in the latest month of the chosen year, by Road Name (top 5), compared with the month before.|Latest deliveries = the 4 most recent haulage entries.'],
+    ['Pits in production', 'Every pit except Not started, ordered by % of limit used.|Used = crushed this year ÷ Extraction Limit. Crushed = tonnes in the chosen year (or all time).|Stock est. = Best Available Stock Estimate. Stockpile = estimate + crushed − hauled, today.|Reserved = open booked tonnes still to haul. Last production is amber when over 21 days ago.']
+  ];
   function render() {
     const root = $('dash-root'); if (!root) return;
     if (YEAR == null) YEAR = S.CUR;
@@ -1149,7 +1203,7 @@ var G = (function () {
     const B = bkd(), openB = B ? B.BOOKINGS.filter(isOpen) : [], outstanding = B ? sum(openB.map(bal)) : 0;
     const bkPits = B ? Object.keys(B.PITS) : [], tot = id => pitTotals(id);
     const reserved = B ? sum(bkPits.map(id => tot(id).reserved)) : 0, overT = B ? sum(bkPits.map(id => tot(id).over)) : 0, overN = B ? openB.filter(b => cover(b).kind !== 'ok').length : 0;
-    const stock = stockAt(y), AL = (() => { const f = S.bookings; S.bookings = S.bookingsAll; const r = alerts(); S.bookings = f; return r; })(), crit = AL.filter(a => a.sev === 'crit').length;
+    const stock = stockAt(ALL || y > S.CUR ? S.CUR : y), AL = (() => { const f = S.bookings; S.bookings = S.bookingsAll; const r = alerts(); S.bookings = f; return r; })(), crit = AL.filter(a => a.sev === 'crit').length;
     const overLim = R.filter(p => p.limit && prodY(y, p.id) > p.limit), near = R.filter(p => p.limit && prodY(y, p.id) <= p.limit && prodY(y, p.id) / p.limit >= 0.95);
     const roadsN = new Set(S.ROADS.filter(e => ALL || e.y === y).map(e => e.road)).size;
     const pad = a => a.slice(0, mAv).concat(new Array(12 - mAv).fill(0));
@@ -1158,7 +1212,7 @@ var G = (function () {
       '<div class="kpi-row six">' +
       kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodYr, limAll) + '% of the annual limit' : '') : (limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
       kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', (S.hasLoads ? fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' : 'To ') + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
-      kpi(y === S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y === S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years')) : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years'), '', 'stack', 'v') +
+      kpi(y >= S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y >= S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years')) : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years'), '', 'stack', 'v') +
       (B ? kpi('Open bookings', String(openB.length), '', fmtN(outstanding) + ' t outstanding' + (overN ? ' · <b style="color:var(--red);">' + overN + ' over-allocated</b>' : ''), overN ? 'warn' : '', 'cal', 'b')
          : kpi('Open bookings', '–', '', 'No bookings data sent', '', 'cal', 'b')) +
       kpi('Pits over limit', String(overLim.length), 'this year', near.length + ' more within 5% of the limit', overLim.length ? 'warn' : '', 'gauge', 'a') +
@@ -1222,6 +1276,7 @@ var G = (function () {
       }).join('') + '</tbody></table></div>' +
       (B ? '<div class="bk-legend" style="margin-top:10px;"><span><i style="background:var(--violet)"></i>Used this calendar year</span><span><i style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.7) 0 2px,var(--violet) 2px 4px)"></i>Reserved by open bookings</span><span><i style="background:repeating-linear-gradient(45deg,#C24545 0 2px,#F5D5D5 2px 4px);border:1px solid #C24545"></i>' + (S.overRule === 'hauled' ? 'Hauled over booking' : 'Reserved, not yet crushed') + '</span></div>' : '') + '</div>';
     root.innerHTML = h;
+    G.addInfo(root, INFO);
   }
 
   function boot() {
@@ -1235,7 +1290,8 @@ var G = (function () {
     const want = parseInt(raw.split(/[,;\s]+/).pop(), 10);
     /* keep the chosen year even when it has no records, so the filter always applies */
     YEAR = want >= 1990 && want <= 2100 ? want : S.CUR;
-    NODATA = !ALL && S.YEARS.indexOf(YEAR) < 0;
+    NODATA = !ALL && !sum(prodM(YEAR)) && !sum(haulM(YEAR));
+    G.footer(ALL ? 'all time' : String(YEAR));
     render();
   }
 
