@@ -714,6 +714,7 @@ tr.sel-row td{background:var(--violet-tint);}
   .att-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
   .att-x{cursor:pointer;font-size:20px;line-height:1;color:var(--muted);padding:2px 6px;border-radius:6px;}
   .att-x:hover{background:var(--line-soft);color:var(--ink);}
+  .panel.nodata{margin-bottom:16px;border:1px solid #F3D9AE;background:#FFFBF3;}
   .g2.one{grid-template-columns:1fr;}
   html::-webkit-scrollbar{width:10px;}
   html::-webkit-scrollbar-thumb{background:#CBD1E3;border-radius:6px;border:2px solid transparent;background-clip:padding-box;}
@@ -1121,12 +1122,12 @@ var G = (function () {
   const { MON, MONTH_FULL, C, S, $, sum, D, fmt, fmtN, esc, regPits, pitOf, prodM, haulM, prodY, monthsAvail, stockAt, loadsWhere,
           limitAll, activeRows, pctOf, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge, colChart, donut, spark, legend, hbar,
           pill, compPill, kpi, overLabel, alerts, alertRow } = G;
-  let YEAR = null, ALL = false;
+  let YEAR = null, ALL = false, NODATA = false;
 
 
   function render() {
     const root = $('dash-root'); if (!root) return;
-    if (YEAR == null || S.YEARS.indexOf(YEAR) < 0) YEAR = S.CUR;
+    if (YEAR == null) YEAR = S.CUR;
     const df = $('demo-flag'); if (df) df.hidden = !S.demo;
 
     const y = ALL ? S.CUR : YEAR, pm = prodM(y), hm = haulM(y), mAv = monthsAvail(y);
@@ -1142,7 +1143,8 @@ var G = (function () {
     const roadsN = new Set(S.ROADS.filter(e => ALL || e.y === y).map(e => e.road)).size;
     const pad = a => a.slice(0, mAv).concat(new Array(12 - mAv).fill(0));
 
-    let h = '<div class="kpi-row six">' +
+    let h = (NODATA ? '<div class="panel nodata"><div class="panel-title">No data for ' + y + '</div><div class="panel-sub" style="margin-top:4px;">No crushing or haulage has been recorded in ' + y + '. Stockpile, bookings and alerts below still show the live position.</div></div>' : '') +
+      '<div class="kpi-row six">' +
       kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodYr, limAll) + '% of the annual limit' : '') : (limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
       kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
       kpi(y === S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y === S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : 'Crushed less hauled, all years') : 'Crushed less hauled, all years', '', 'stack', 'v') +
@@ -1163,7 +1165,7 @@ var G = (function () {
       ? '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by year</div><div class="panel-sub">Tonnes per calendar year · ' + S.CUR + ' is year to date</div></div></div>' +
         colChart(S.YEARS.map(String), [{ name:'Crushed', color:C.v, vals:prodByY }, { name:'Hauled', color:C.b, vals:haulByY }], { h:250, tipCat:i => String(S.YEARS[i]) + (S.YEARS[i] === S.CUR ? ' (to date)' : '') })
       : '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by month, ' + y + '</div><div class="panel-sub">Tonnes per month</div></div></div>' +
-        colChart(MON, [{ name:'Crushed', color:C.v, vals:pm.map((v, i) => (i < mAv ? v : null)) }, { name:'Hauled', color:C.b, vals:hm.map((v, i) => (i < mAv ? v : null)) }], { h:250, tipCat:i => MONTH_FULL[i] + ' ' + y })) +
+        (NODATA || !(sum(pm) + sum(hm)) ? '<div class="cell-muted" style="padding:60px 0;text-align:center;">No data for ' + y + '.</div>' : colChart(MON, [{ name:'Crushed', color:C.v, vals:pm.map((v, i) => (i < mAv ? v : null)) }, { name:'Hauled', color:C.b, vals:hm.map((v, i) => (i < mAv ? v : null)) }], { h:250, tipCat:i => MONTH_FULL[i] + ' ' + y }))) +
       legend([['Tonnes crushed', C.v], ['Tonnes hauled', C.b]]) + '</div>';
 
     /* alerts and pit capacity ranking */
@@ -1220,7 +1222,9 @@ var G = (function () {
     /* all time: year "all", or allTime true (e.g. gblAllTime) */
     ALL = /^(all|all time)$/i.test(raw) || v.allTime === true || String(v.allTime).toLowerCase() === 'true';
     const want = parseInt(raw.split(/[,;\s]+/).pop(), 10);
-    YEAR = S.YEARS.indexOf(want) >= 0 ? want : S.CUR;
+    /* keep the chosen year even when it has no records, so the filter always applies */
+    YEAR = want >= 1990 && want <= 2100 ? want : S.CUR;
+    NODATA = !ALL && S.YEARS.indexOf(YEAR) < 0;
     render();
   }
 
