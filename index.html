@@ -786,7 +786,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
    ========================================================================== */
 var G = (function () {
   'use strict';
-  const BUILD = '21 Oct 19:25';
+  const BUILD = '21 Oct 19:44';
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const MATS = ['3.5 Roadbase', '150 Minus'];
@@ -1291,7 +1291,6 @@ var G = (function () {
     /* keep the chosen year even when it has no records, so the filter always applies */
     YEAR = want >= 1990 && want <= 2100 ? want : S.CUR;
     NODATA = !ALL && !sum(prodM(YEAR)) && !sum(haulM(YEAR));
-    G.footer(ALL ? 'all time' : String(YEAR));
     render();
   }
 
