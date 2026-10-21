@@ -779,6 +779,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
                deed:"Signed" | "Awaiting signing" | "Not required", issues:["Access track dispute."] }],
      licences:[{ p:"75", name:"Dareen Pit", end:"2026-10-15", renew:"Yes" }],
      valuePerT:20,
+     showInfo:true | false,                                 // info buttons beside titles (default true)
      years:[2025, 2026] | 2026 | "all",                     // Analytics: which calendar years to show (default: current year)
      lfl:true                                               // Analytics: like for like, same months in every year
    }
@@ -786,7 +787,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
    ========================================================================== */
 var G = (function () {
   'use strict';
-  const BUILD = '21 Oct 19:44';
+  const BUILD = '21 Oct 20:09';
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const MATS = ['3.5 Roadbase', '150 Minus'];
@@ -822,6 +823,8 @@ var G = (function () {
     if (!P && !demo) return { waiting:true };
     S.demo = !P; P = P || demo;
     S.sent = { year:P.year, years:P.years, allTime:P.allTime };
+    /* showInfo: false hides the info buttons; anything else (or not sent) shows them */
+    S.showInfo = !(P.showInfo === false || String(P.showInfo).toLowerCase() === 'false');
     S.view = { allTime:P.allTime, year:P.year, years:P.years, lfl:P.lfl === true || String(P.lfl).toLowerCase() === 'true' };
 
     const now = new Date();
@@ -1096,6 +1099,7 @@ var G = (function () {
   /* ---------- hover tooltip: any element with data-tip ("Title|row|row") ---------- */
   /* info icons: map of [title starts with, explanation]; lines separated by | */
   function addInfo(root, map) {
+    if (!S.showInfo) return;
     const put = (el, txt) => { if (el.querySelector('.info-i')) return; const t = el.textContent.trim(); const hit = map.filter(m => t.toLowerCase().indexOf(m[0].toLowerCase()) === 0).sort((x, y) => y[0].length - x[0].length)[0]; if (!hit) return;   /* longest match wins */
       const i = document.createElement('span'); i.className = 'info-i'; i.setAttribute('tabindex', '0'); i.setAttribute('role', 'button'); i.setAttribute('aria-label', 'How this is calculated');
       i.setAttribute('data-tip', 'How this works|' + hit[1]); i.textContent = 'i';
