@@ -858,6 +858,7 @@ var G = (function () {
     S.bookings = Array.isArray(P.bookings) ? P.bookings.map(b => ({
       id:str(b.id), pit:str(b.p), mat:normMat(b.mat), t:num(b.t) || 0, del:num(b.del) || 0, req:isoOf(b.req), on:isoOf(b.on) || isoOf(b.req), status:normStatus(b.status), road:str(b.r), by:str(b.by)
     })) : null;
+    S.bookingsAll = S.bookings;   /* pages filter S.bookings by the Required by date; alerts use all */
     S.overRule = P.overRule || (S.demo ? 'stock' : 'hauled');
     S.bstock = Array.isArray(P.bstock) ? P.bstock.map(x => ({ pit:str(x.p), mat:str(x.mat), t:num(x.t) || 0 })) : null;
 
@@ -1142,10 +1143,13 @@ var G = (function () {
     const YS = ALL ? S.YEARS : [y], prodByY = YS.map(a => sum(prodM(a))), haulByY = YS.map(a => sum(haulM(a)));
     const prod = sum(prodByY), haul = sum(haulByY), prodYr = sum(pm), span = S.YEARS[0] + (S.YEARS.length > 1 ? ' to ' + S.YEARS[S.YEARS.length - 1] : '');
     const R = regPits(), limAll = limitAll(), act = activeRows();
+    /* bookings follow the calendar: Required by date in the chosen year (booked-on date if there is no Required by) */
+    const reqYear = b => { const d = b.req || b.on; return d ? +d.slice(0, 4) : null; };
+    S.bookings = S.bookingsAll;   /* as in the mock-up: bookings are the live position, not filtered by year */
     const B = bkd(), openB = B ? B.BOOKINGS.filter(isOpen) : [], outstanding = B ? sum(openB.map(bal)) : 0;
     const bkPits = B ? Object.keys(B.PITS) : [], tot = id => pitTotals(id);
     const reserved = B ? sum(bkPits.map(id => tot(id).reserved)) : 0, overT = B ? sum(bkPits.map(id => tot(id).over)) : 0, overN = B ? openB.filter(b => cover(b).kind !== 'ok').length : 0;
-    const stock = stockAt(y), AL = alerts(), crit = AL.filter(a => a.sev === 'crit').length;
+    const stock = stockAt(y), AL = (() => { const f = S.bookings; S.bookings = S.bookingsAll; const r = alerts(); S.bookings = f; return r; })(), crit = AL.filter(a => a.sev === 'crit').length;
     const overLim = R.filter(p => p.limit && prodY(y, p.id) > p.limit), near = R.filter(p => p.limit && prodY(y, p.id) <= p.limit && prodY(y, p.id) / p.limit >= 0.95);
     const roadsN = new Set(S.ROADS.filter(e => ALL || e.y === y).map(e => e.road)).size;
     const pad = a => a.slice(0, mAv).concat(new Array(12 - mAv).fill(0));
@@ -1166,7 +1170,7 @@ var G = (function () {
     const parts = [['Under production', R.filter(p => p.status === 'Under production').length, C.v], ['Completed', R.filter(p => p.status === 'Completed').length, C.g], ['Not started', R.filter(p => p.status === 'Not started').length, C.grey]];
     const pAnnual = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Annual extraction progress</div><div class="panel-sub">Tonnes crushed in calendar year ' + y + ' against the sum of the pit limits</div></div></div>' +
       bar('Crushed against the annual limit for all open pits (' + R.filter(p => p.limit).length + ')', prodYr, limAll, 'linear-gradient(90deg,' + C.vm + ',' + C.v + ')') +
-      '<div style="display:flex;align-items:center;gap:18px;margin-top:6px;">' + donut(parts.map(p => ({ v:p[1], color:p[2], label:p[0] })), 92) + '<div style="flex:1;">' + parts.map(p => '<div class="stat-line"><span><i class="legend-dot" style="background:' + p[2] + ';display:inline-block;margin-right:7px;"></i>' + p[0] + '</span><b>' + p[1] + '</b></div>').join('') + '</div></div>' +
+      '<div style="display:flex;align-items:center;gap:28px;margin-top:10px;">' + donut(parts.map(p => ({ v:p[1], color:p[2], label:p[0] })), 140) + '<div style="flex:1;font-size:14px;">' + parts.map(p => '<div class="stat-line" style="padding:7px 0;"><span><i class="legend-dot" style="background:' + p[2] + ';display:inline-block;margin-right:7px;"></i>' + p[0] + '</span><b>' + p[1] + '</b></div>').join('') + '</div></div>' +
       (top && top.limit && limAll && top.limit / limAll > 0.25 ? '<div class="v9-note">Check: ' + esc(top.name) + ' carries a ' + fmtN(top.limit) + ' t limit, ' + Math.round(top.limit / limAll * 100) + '% of the total.</div>' : '') + '</div>';
     const pMonthly = (ALL
       ? '<div class="panel"><div class="panel-head"><div><div class="panel-title">Crushed and hauled by year</div><div class="panel-sub">Tonnes per calendar year · ' + S.CUR + ' is year to date</div></div></div>' +
