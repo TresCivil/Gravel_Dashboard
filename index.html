@@ -780,6 +780,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
      licences:[{ p:"75", name:"Dareen Pit", end:"2026-10-15", renew:"Yes" }],
      valuePerT:20,
      showInfo:true | false,                                 // info buttons beside titles (default true)
+     info:[{ title:"Crushed", text:"line one|line two" }],      // optional: your own text for any info box
      years:[2025, 2026] | 2026 | "all",                     // Analytics: which calendar years to show (default: current year)
      lfl:true                                               // Analytics: like for like, same months in every year
    }
@@ -787,7 +788,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
    ========================================================================== */
 var G = (function () {
   'use strict';
-  const BUILD = '21 Oct 20:09';
+  const BUILD = '24 Oct 19:43';
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const MATS = ['3.5 Roadbase', '150 Minus'];
@@ -824,6 +825,8 @@ var G = (function () {
     S.demo = !P; P = P || demo;
     S.sent = { year:P.year, years:P.years, allTime:P.allTime };
     /* showInfo: false hides the info buttons; anything else (or not sent) shows them */
+    /* info: [{ title, text }] from the Src replaces the built-in explanation for that title ("|" starts a new line) */
+    S.infoOverride = Array.isArray(P.info) ? P.info.map(x => [str(x.title || x.Title), str(x.text != null ? x.text : x.Text)]).filter(x => x[0]) : [];
     S.showInfo = !(P.showInfo === false || String(P.showInfo).toLowerCase() === 'false');
     S.view = { allTime:P.allTime, year:P.year, years:P.years, lfl:P.lfl === true || String(P.lfl).toLowerCase() === 'true' };
 
@@ -1100,6 +1103,11 @@ var G = (function () {
   /* info icons: map of [title starts with, explanation]; lines separated by | */
   function addInfo(root, map) {
     if (!S.showInfo) return;
+    if (S.infoOverride && S.infoOverride.length) {
+      const k = t => t.toLowerCase().trim();
+      map = map.map(m => { const o = S.infoOverride.find(x => k(x[0]) === k(m[0])); return o ? [m[0], o[1]] : m; })
+        .concat(S.infoOverride.filter(o => !map.some(m => k(m[0]) === k(o[0]))));
+    }
     const put = (el, txt) => { if (el.querySelector('.info-i')) return; const t = el.textContent.trim(); const hit = map.filter(m => t.toLowerCase().indexOf(m[0].toLowerCase()) === 0).sort((x, y) => y[0].length - x[0].length)[0]; if (!hit) return;   /* longest match wins */
       const i = document.createElement('span'); i.className = 'info-i'; i.setAttribute('tabindex', '0'); i.setAttribute('role', 'button'); i.setAttribute('aria-label', 'How this is calculated');
       i.setAttribute('data-tip', 'How this works|' + hit[1]); i.textContent = 'i';
@@ -1280,7 +1288,8 @@ var G = (function () {
       }).join('') + '</tbody></table></div>' +
       (B ? '<div class="bk-legend" style="margin-top:10px;"><span><i style="background:var(--violet)"></i>Used this calendar year</span><span><i style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.7) 0 2px,var(--violet) 2px 4px)"></i>Reserved by open bookings</span><span><i style="background:repeating-linear-gradient(45deg,#C24545 0 2px,#F5D5D5 2px 4px);border:1px solid #C24545"></i>' + (S.overRule === 'hauled' ? 'Hauled over booking' : 'Reserved, not yet crushed') + '</span></div>' : '') + '</div>';
     root.innerHTML = h;
-    G.addInfo(root, INFO);
+    const LOADS = 'Loads = Tonnes Removed ÷ Vehicle Load Capacity for each haulage entry, rounded up to whole trips (e.g. 30 t on a 25 t truck = 2 loads). An entry with no capacity counts as 1 load.';
+    G.addInfo(root, INFO.map(x => (S.hasLoads && (x[0] === 'Hauled' || x[0] === 'Haulage in')) ? [x[0], x[1] + '|' + LOADS] : x));
   }
 
   function boot() {
