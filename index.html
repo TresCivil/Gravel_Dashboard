@@ -722,6 +722,13 @@ tr.sel-row td{background:var(--violet-tint);}
   .info-i:hover,.info-i:focus{border-color:var(--violet);color:var(--violet);background:var(--violet-tint);outline:none;}
   .kpi-label .info-i{vertical-align:1px;}
   .gtip{max-width:340px;}
+  /* sortable table headers */
+  th.th-sort{cursor:pointer;user-select:none;white-space:nowrap;}
+  th.th-sort:hover{color:var(--ink);}
+  .sort-i{display:inline-flex;vertical-align:-1px;margin-left:6px;}
+  .sort-i path{fill:#B9C0D4;}
+  th[aria-sort="ascending"] .sort-i .up,th[aria-sort="descending"] .sort-i .dn{fill:var(--violet);}
+  th[aria-sort="ascending"],th[aria-sort="descending"]{color:var(--ink);}
   .g2.one{grid-template-columns:1fr;}
   html::-webkit-scrollbar{width:10px;}
   html::-webkit-scrollbar-thumb{background:#CBD1E3;border-radius:6px;border:2px solid transparent;background-clip:padding-box;}
@@ -788,7 +795,7 @@ window.DEMO = null; /* live data only: everything comes from Power Apps via the 
    ========================================================================== */
 var G = (function () {
   'use strict';
-  const BUILD = '24 Oct 19:43';
+  const BUILD = '24 Oct 19:51';
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const MATS = ['3.5 Roadbase', '150 Minus'];
@@ -1100,6 +1107,58 @@ var G = (function () {
   const alertRow = a => '<div class="activity-row"><div class="activity-icon ' + (a.sev === 'crit' ? 'crit' : 'warn') + '">' + icon('alert') + '</div><div class="activity-body"><div class="activity-title">' + esc(a.title) + '</div><div class="activity-meta">' + esc(a.meta) + '</div></div><div class="activity-time">' + a.when + '</div></div>';
 
   /* ---------- hover tooltip: any element with data-tip ("Title|row|row") ---------- */
+  /* ---------- sortable tables: click a header to sort ascending, descending, then back to the original order ---------- */
+  const SORTS = {};
+  const MONI = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+  function sortVal(td) {
+    if (!td) return null;
+    const ds = td.getAttribute('data-sort'); if (ds != null) return isNaN(+ds) ? ds.toLowerCase() : +ds;
+    const dn = td.querySelector('[data-n]'); if (dn) return +dn.getAttribute('data-n');
+    const t = td.textContent.replace(/\s+/g, ' ').trim();
+    if (!t || t === '-' || t === '–') return null;
+    const d = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})/.exec(t); if (d && MONI[d[2].toLowerCase()] != null) return Date.UTC(+d[3], MONI[d[2].toLowerCase()], +d[1]);
+    const n = /^[+−-]?\$?[\d,]+(\.\d+)?/.exec(t.replace('−', '-')); if (n) return parseFloat(n[0].replace(/[$,+]/g, ''));
+    return t.toLowerCase();
+  }
+  function sortable(root) {
+    root.querySelectorAll('table').forEach((tbl, ti) => {
+      const head = tbl.tHead, body = tbl.tBodies[0]; if (!head || !body) return;
+      const panel = tbl.closest('.att-detail') || tbl.closest('.panel');
+      const key = ((panel && panel.querySelector('.panel-title')) ? panel.querySelector('.panel-title').textContent.split('\n')[0].trim() : '') + '#' + ti;
+      const rows0 = Array.prototype.slice.call(body.rows);
+      const ths = Array.prototype.slice.call(head.rows[0].cells);
+      const apply = () => {
+        const st = SORTS[key];
+        let rows = rows0.slice();
+        if (st) {
+          rows.sort((a, b) => {
+            const x = sortVal(a.cells[st.col]), y = sortVal(b.cells[st.col]);
+            if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;   /* blanks always last */
+            const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'en', { numeric:true });
+            return st.dir === 'asc' ? r : -r;
+          });
+        }
+        rows.forEach(r => body.appendChild(r));
+        ths.forEach((th, i) => th.setAttribute('aria-sort', st && st.col === i ? (st.dir === 'asc' ? 'ascending' : 'descending') : 'none'));
+      };
+      ths.forEach((th, i) => {
+        if (th.querySelector('.sort-i')) return;
+        th.classList.add('th-sort');
+        const ic = document.createElement('span'); ic.className = 'sort-i';
+        ic.innerHTML = '<svg viewBox="0 0 10 14" width="9" height="12" aria-hidden="true"><path class="up" d="M5 1 9 5.5H1z"/><path class="dn" d="M5 13 1 8.5h8z"/></svg>';
+        th.appendChild(ic);
+        th.addEventListener('click', e => {
+          e.stopPropagation();
+          const st = SORTS[key];
+          SORTS[key] = !st || st.col !== i ? { col:i, dir:'asc' } : st.dir === 'asc' ? { col:i, dir:'desc' } : null;
+          if (!SORTS[key]) delete SORTS[key];
+          apply();
+        });
+      });
+      apply();
+    });
+  }
+
   /* info icons: map of [title starts with, explanation]; lines separated by | */
   function addInfo(root, map) {
     if (!S.showInfo) return;
@@ -1169,7 +1228,7 @@ var G = (function () {
 
   return { MON, MONTH_FULL, MATS, EXPIRY_DAYS, C, S, $, sum, D, fmt, fmtN, money, esc, load, regPits, pitOf, prodM, haulM, prodY, haulY, ytd, monthsAvail, stockAt, stockAtP,
            loadsOf, loadsWhere, limitAll, activeRows, pctOf, elapsedPct, delta, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge,
-           colChart, lineChart, donut, spark, legend, hbar, pill, compPill, icon, kpi, illus, overLabel, alerts, alertRow, initTips, showError, showWaiting, footer, addInfo };
+           colChart, lineChart, donut, spark, legend, hbar, pill, compPill, icon, kpi, illus, overLabel, alerts, alertRow, initTips, showError, showWaiting, footer, addInfo, sortable };
 })();
 
 </script>
@@ -1290,6 +1349,7 @@ var G = (function () {
     root.innerHTML = h;
     const LOADS = 'Loads = Tonnes Removed ÷ Vehicle Load Capacity for each haulage entry, rounded up to whole trips (e.g. 30 t on a 25 t truck = 2 loads). An entry with no capacity counts as 1 load.';
     G.addInfo(root, INFO.map(x => (S.hasLoads && (x[0] === 'Hauled' || x[0] === 'Haulage in')) ? [x[0], x[1] + '|' + LOADS] : x));
+    G.sortable(root);
   }
 
   function boot() {
