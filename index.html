@@ -848,7 +848,9 @@ var G = (function () {
     const normComp = v => ({ compliant:'Compliant', pass:'Compliant', passed:'Compliant', noncompliant:'Non-compliant', notcompliant:'Non-compliant', fail:'Non-compliant', failed:'Non-compliant', notyettested:'Not yet tested', nottested:'Not yet tested', untested:'Not yet tested', '':'' })[key(v)] ?? str(v);
     S.pits = (P.pits || []).map(p => ({
       id:str(p.id), name:str(p.name) || ('Pit ' + str(p.id)), loc:str(p.loc), status:normPitStatus(p.status), comp:normComp(p.comp) || 'Not yet tested',
-      owner:str(p.owner), limit:num(p.limit), stockEst:num(p.stockEst), last:isoOf(p.last), stock:num(p.stock), open:num(p.open)
+      owner:str(p.owner), limit:num(p.limit), stockEst:num(p.stockEst), last:isoOf(p.last), stock:num(p.stock), open:num(p.open),
+      /* Pit Status = Open (2026-10-27). An older app version sends no status, so then every pit counts */
+      po:p.ps == null ? true : str(p.ps).trim().toLowerCase() === 'open'
     })).filter(p => p.id);
 
     const ym = v => { const i = isoOf(v); return i ? { y:parseInt(i.slice(0, 4), 10), m:parseInt(i.slice(5, 7), 10) } : null; };
@@ -916,7 +918,9 @@ var G = (function () {
   /* loads: the real count when Power Apps sends it, otherwise about 24.6 t a load as in the original */
   const loadsOf = t => Math.round(t / 24.6);
   const loadsWhere = f => { const rows = (S.ROADS.length ? S.ROADS : S.HAUL).filter(f); return S.hasLoads ? Math.round(sum(rows.map(e => (e.n != null ? e.n : e.t / 24.6)))) : loadsOf(sum(rows.map(e => e.t))); };
-  const limitAll = () => sum(S.pits.map(p => p.limit || 0));
+  /* annual limit used: Open pits only, for both the limit total and the tonnes crushed */
+  const limitAll = () => sum(S.pits.filter(p => p.po).map(p => p.limit || 0));
+  const prodOpenY = y => { const o = new Set(S.pits.filter(p => p.po).map(p => p.id)); return sum(S.CRUSH.filter(e => e.y === y && o.has(e.pit)).map(e => e.t)); };
   const activeRows = () => S.pits.filter(p => p.status !== 'Not started');
   const pctOf = (v, lim) => (lim ? Math.round(v / lim * 100) : null);
   const elapsedPct = y => (y < S.CUR ? 100 : Math.round((D(S.TODAY) - D(S.CUR + '-01-01') + 1) / 365 * 100));
@@ -1082,7 +1086,8 @@ var G = (function () {
       const overs = B.BOOKINGS.filter(b => (S.overRule === 'hauled' || isOpen(b)) && cover(b).kind === 'over' || (isOpen(b) && cover(b).kind === 'pending')), ot = sum(Object.keys(B.PITS).map(id => pitTotals(id).over));
       if (overs.length) out.push({ sev:'warn', title:overs.length + ' booking' + (overs.length === 1 ? ' is' : 's are') + ' over-allocated', meta:S.overRule === 'hauled' ? fmtN(ot) + ' t hauled beyond the booked tonnes (' + overs.map(b => b.id).slice(0, 4).join(', ') + (overs.length > 4 ? '…' : '') + ').' : fmtN(ot) + ' t is booked that has not been crushed yet.', when:'Now' });
     }
-    R.filter(p => p.comp === 'Non-compliant').forEach(p => out.push({ sev:'crit', title:p.name + ' has a non-compliant lot', meta:'Failed testing. Hold the lot and retest before further haulage.', when:'Testing' }));
+    /* same rule as Needs attention on Analytics: Not started pits are left out */
+    R.filter(p => p.status !== 'Not started' && p.comp === 'Non-compliant').forEach(p => out.push({ sev:'crit', title:p.name + ' has a non-compliant lot', meta:'Failed testing. Hold the lot and retest before further haulage.', when:'Testing' }));
     if (S.owners) {
       const priv = S.owners.filter(o => o.type === 'Private'), waiting = priv.filter(o => o.deed === 'Awaiting signing'), held = sum(rows.filter(r => r.held).map(r => Math.max(0, r.bal)));
       if (waiting.length && priv.length) out.push({ sev:'warn', title:waiting.length + ' of ' + priv.length + ' private owners are awaiting a signed Deed of Variation', meta:(S.royaltyAmounts ? money(held) + ' of royalty is held until the deeds are signed.' : 'Royalty is held until the deeds are signed.'), when:'Owners' });
@@ -1230,7 +1235,7 @@ var G = (function () {
   function showError(msg) { const root = document.getElementById('an-root') || document.getElementById('dash-root'); const f = document.getElementById('demo-flag'); if (f) f.hidden = true; if (!root) return; root.innerHTML = '<div><div class="panel" style="border:1px solid #F0D3D3;"><div class="panel-title">Could not load the data</div><div class="panel-sub" style="margin-top:6px;">' + esc(msg) + '</div></div></div>'; }
 
   return { MON, MONTH_FULL, MATS, EXPIRY_DAYS, C, S, $, sum, D, fmt, fmtN, money, esc, load, regPits, pitOf, prodM, haulM, prodY, haulY, ytd, monthsAvail, stockAt, stockAtP,
-           loadsOf, loadsWhere, limitAll, activeRows, pctOf, elapsedPct, delta, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge,
+           loadsOf, loadsWhere, limitAll, prodOpenY, activeRows, pctOf, elapsedPct, delta, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge,
            colChart, lineChart, donut, spark, legend, hbar, pill, compPill, icon, kpi, illus, overLabel, alerts, alertRow, initTips, showError, showWaiting, footer, addInfo, sortable };
 })();
 
@@ -1239,21 +1244,21 @@ var G = (function () {
 (function () {
   'use strict';
   const { MON, MONTH_FULL, C, S, $, sum, D, fmt, fmtN, esc, regPits, pitOf, prodM, haulM, prodY, monthsAvail, stockAt, loadsWhere,
-          limitAll, activeRows, pctOf, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge, colChart, donut, spark, legend, hbar,
+          limitAll, prodOpenY, activeRows, pctOf, isOpen, bal, cover, pitTotals, hasBookings, bkd, capCol, capGauge, colChart, donut, spark, legend, hbar,
           pill, compPill, kpi, overLabel, alerts, alertRow } = G;
   let YEAR = null, ALL = false, NODATA = false;
 
 
 
   const INFO = [
-    ['Crushed', 'Tonnes Produced from the Crushing Production Log for the chosen calendar year (or all time).|% = tonnes crushed this year ÷ the sum of every pit\'s Extraction Limit (t).|The small bars show each month (or each year for all time).'],
+    ['Crushed', 'Tonnes Produced from the Crushing Production Log for the chosen calendar year (or all time).|% = tonnes crushed this year at Open pits ÷ the sum of the Open pits\' Extraction Limit (t).|The small bars show each month (or each year for all time).'],
     ['Hauled', 'Tonnes Removed from the Removal & Haulage Log for the chosen year (or all time).|Roads and jobs = how many different Road Names had haulage.'],
     ['Stockpile', 'Best Available Stock Estimate + all tonnes crushed − all tonnes hauled, up to today (or 31 Dec of a past year).'],
     ['Open bookings', 'Bookings with status In progress or Confirmed. Live, not filtered by year.|Outstanding = Booked Tonnes − Tonnes Removed for those bookings.|Over-allocated = bookings where Tonnes Removed is above Booked Tonnes.'],
     ['Pits over limit', 'Pits whose tonnes crushed in the year are above their Extraction Limit (t).|Within 5% = between 95% and 100% of the limit.'],
     ['Alerts', 'Count of the items in Alerts and issues: critical (red) and to watch (amber). Live, not filtered by year.'],
     ['Alerts and issues', 'Live checks, not filtered by year:|Pits over or within 5% of their limit · non-compliant lots · bookings hauled over the booked tonnes · deeds awaiting signing · royalties ready to pay or overdue · licences ending within 90 days · owner issues · pits under production with no crushing for 21+ days.'],
-    ['Annual extraction progress', 'Tonnes crushed in the calendar year ÷ the sum of every pit\'s Extraction Limit (t).|Donut = number of pits by Status (Under production, Completed, Not started).|A Check note appears if one pit holds more than 25% of all limits.'],
+    ['Annual extraction progress', 'Tonnes crushed in the calendar year at pits with Pit Status = Open ÷ the sum of those pits\' Extraction Limit (t).|Donut = number of pits by Status (Under production, Completed, Not started).|A Check note appears if one pit holds more than 25% of all limits.'],
     ['Crushed and hauled by month', 'Tonnes Produced and Tonnes Removed per calendar month in the chosen year.'],
     ['Crushed and hauled by year', 'Tonnes Produced and Tonnes Removed per calendar year. The current year is to date.'],
     ['Pit capacity', 'Each pit\'s tonnes crushed in the year ÷ its Extraction Limit (t), highest first.|Green 95–100%, amber under 95%, red over 100%. Resets every 1 January.'],
@@ -1284,7 +1289,7 @@ var G = (function () {
 
     let h = (NODATA ? '<div class="panel nodata"><div class="panel-title">No data for ' + y + '</div><div class="panel-sub" style="margin-top:4px;">No crushing or haulage has been recorded in ' + y + '. Stockpile, bookings and alerts below still show the live position.</div></div>' : '') +
       '<div class="kpi-row six">' +
-      kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodYr, limAll) + '% of the annual limit' : '') : (limAll ? pctOf(prod, limAll) + '% of the ' + fmtN(limAll) + ' t annual limit' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
+      kpi(ALL ? 'Crushed, all time' : 'Crushed ' + y, fmtN(prod), 't', ALL ? span + (limAll ? ' · ' + S.CUR + ' is ' + pctOf(prodOpenY(S.CUR), limAll) + '% of the Open pits\' annual limit' : '') : (limAll ? pctOf(prodOpenY(y), limAll) + '% of the ' + fmtN(limAll) + ' t limit for Open pits' : 'No pit limits recorded'), '', 'prod', 'v', spark(ALL ? prodByY : pad(pm), C.v)) +
       kpi(ALL ? 'Hauled, all time' : 'Hauled ' + y, fmtN(haul), 't', (S.hasLoads ? fmtN(loadsWhere(e => ALL || e.y === y)) + ' loads to ' : 'To ') + roadsN + ' roads and jobs', '', 'truck', 'g', spark(ALL ? haulByY : pad(hm), C.b)) +
       kpi(y >= S.CUR ? 'Stockpile on hand' : 'Stockpile at 31 Dec ' + y, fmtN(stock), 't', y >= S.CUR ? (B ? fmtN(reserved) + ' t reserved by open bookings' : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years')) : (S.OFFT ? 'Starting stock + crushed − hauled' : 'Crushed less hauled, all years'), '', 'stack', 'v') +
       (B ? kpi('Open bookings', String(openB.length), '', fmtN(outstanding) + ' t outstanding' + (overN ? ' · <b style="color:var(--red);">' + overN + ' over-allocated</b>' : ''), overN ? 'warn' : '', 'cal', 'b')
@@ -1293,11 +1298,11 @@ var G = (function () {
       kpi('Alerts', String(AL.length), '', crit + ' critical · ' + (AL.length - crit) + ' to watch', crit ? 'warn' : '', 'alert', 'a') + '</div>';
 
     /* annual extraction progress and monthly chart */
-    const top = R.slice().sort((a, b) => (b.limit || 0) - (a.limit || 0))[0];
+    const top = R.filter(p => p.po).sort((a, b) => (b.limit || 0) - (a.limit || 0))[0];
     const bar = (label, v, lim, color) => { const p = pctOf(v, lim) || 0; return '<div style="margin-bottom:18px;"><div style="display:flex;justify-content:space-between;gap:12px;font-size:12.5px;margin-bottom:8px;"><b style="color:var(--ink);">' + label + '</b><span style="color:var(--ink-soft);white-space:nowrap;"><b>' + fmtN(v) + '</b> of ' + fmtN(lim) + ' t · <b style="color:' + (p > 100 ? C.r : 'var(--ink)') + ';">' + p + '%</b></span></div><div class="progress-track" style="height:18px;border-radius:10px;"><div class="progress-fill" style="width:' + Math.min(100, p) + '%;background:' + color + ';border-radius:10px;"></div></div></div>'; };
     const parts = [['Under production', R.filter(p => p.status === 'Under production').length, C.v], ['Completed', R.filter(p => p.status === 'Completed').length, C.g], ['Not started', R.filter(p => p.status === 'Not started').length, C.grey]];
-    const pAnnual = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Annual extraction progress</div><div class="panel-sub">Tonnes crushed in calendar year ' + y + ' against the sum of the pit limits</div></div></div>' +
-      bar('Crushed against the annual limit for all open pits (' + R.filter(p => p.limit).length + ')', prodYr, limAll, 'linear-gradient(90deg,' + C.vm + ',' + C.v + ')') +
+    const pAnnual = '<div class="panel"><div class="panel-head"><div><div class="panel-title">Annual extraction progress</div><div class="panel-sub">Tonnes crushed in calendar year ' + y + ' at Open pits against the sum of their limits</div></div></div>' +
+      bar('Crushed at Open pits against their annual limits (' + R.filter(p => p.po && p.limit).length + ' Open pits with a limit)', prodOpenY(y), limAll, 'linear-gradient(90deg,' + C.vm + ',' + C.v + ')') +
       '<div style="display:flex;align-items:center;gap:28px;margin-top:10px;">' + donut(parts.map(p => ({ v:p[1], color:p[2], label:p[0] })), 140) + '<div style="flex:1;font-size:14px;">' + parts.map(p => '<div class="stat-line" style="padding:7px 0;"><span><i class="legend-dot" style="background:' + p[2] + ';display:inline-block;margin-right:7px;"></i>' + p[0] + '</span><b>' + p[1] + '</b></div>').join('') + '</div></div>' +
       (top && top.limit && limAll && top.limit / limAll > 0.25 ? '<div class="v9-note">Check: ' + esc(top.name) + ' carries a ' + fmtN(top.limit) + ' t limit, ' + Math.round(top.limit / limAll * 100) + '% of the total.</div>' : '') + '</div>';
     const pMonthly = (ALL
