@@ -896,7 +896,7 @@ var G = (function () {
       const status = str(r.status) || 'Pending', due = num(r.due), paid = num(r.paid) || 0, held = !!r.held;
       const open = status === 'Pending' || status === 'Overdue', dd = isoOf(r.dueDate);
       const late = open && ((dd && D(dd) < D(S.TODAY)) || status === 'Overdue');
-      return { pit:{ id:str(r.p), name:str(r.name) || pitOf(str(r.p)).name }, dueDate:dd, owner:str(r.owner), due:due, paid:paid, s:{ status:status }, bal:(due || 0) - paid, held:held && open, needs:open && !held, late:late };
+      return { pit:{ id:str(r.p), name:str(r.name) || pitOf(str(r.p)).name }, dueDate:dd, owner:str(r.owner), due:due, paid:paid, s:{ status:status }, bal:(due || 0) - paid, held:held && open, needs:open && !held, late:late, deed:str(r.deed) };
     }) : null;
     S.royaltyAmounts = !!S.royalty && S.royalty.some(r => r.due != null);
     return { ok:true };
@@ -1084,7 +1084,7 @@ var G = (function () {
     }
     R.filter(p => p.comp === 'Non-compliant').forEach(p => out.push({ sev:'crit', title:p.name + ' has a non-compliant lot', meta:'Failed testing. Hold the lot and retest before further haulage.', when:'Testing' }));
     if (S.owners) {
-      const priv = S.owners.filter(o => o.type === 'Private'), waiting = priv.filter(o => o.deed === 'Awaiting signing'), held = sum(rows.filter(r => r.held).map(r => r.due || 0));
+      const priv = S.owners.filter(o => o.type === 'Private'), waiting = priv.filter(o => o.deed === 'Awaiting signing'), held = sum(rows.filter(r => r.held).map(r => Math.max(0, r.bal)));
       if (waiting.length && priv.length) out.push({ sev:'warn', title:waiting.length + ' of ' + priv.length + ' private owners are awaiting a signed Deed of Variation', meta:(S.royaltyAmounts ? money(held) + ' of royalty is held until the deeds are signed.' : 'Royalty is held until the deeds are signed.'), when:'Owners' });
     }
     if (S.royalty && !S.royaltyAmounts) {
@@ -1093,7 +1093,10 @@ var G = (function () {
     }
     if (S.royaltyAmounts) {
       const needs = rows.filter(r => r.needs), late = needs.filter(r => r.late);
-      if (needs.length) out.push({ sev:late.length ? 'crit' : 'warn', title:money(sum(needs.map(r => Math.max(0, r.bal)))) + ' royalty is ready to pay to ' + needs.length + ' owner' + (needs.length === 1 ? '' : 's'), meta:(late.length ? late.length + ' overdue. ' : '') + 'Deed signed.', when:'Royalty' });
+      // distinct owners, not pit rows; "Deed signed" only when every owner listed has a signed deed
+      const nOwn = new Set(needs.map(r => r.owner || r.pit.id)).size, nSigned = new Set(needs.filter(r => r.deed === 'Signed').map(r => r.owner || r.pit.id)).size;
+      const deedNote = nSigned === nOwn ? 'Deed signed.' : nSigned ? 'Deed signed for ' + nSigned + ' of ' + nOwn + ' owners.' : 'No signed deed recorded.';
+      if (needs.length) out.push({ sev:late.length ? 'crit' : 'warn', title:money(sum(needs.map(r => Math.max(0, r.bal)))) + ' royalty is ready to pay to ' + nOwn + ' owner' + (nOwn === 1 ? '' : 's'), meta:(late.length ? late.length + ' overdue. ' : '') + deedNote, when:'Royalty' });
     }
     (S.licences || []).forEach(l => { const n = D(l.end) - D(S.TODAY); if (n <= EXPIRY_DAYS) out.push({ sev:n < 0 ? 'crit' : 'warn', title:(l.name || pitOf(l.pit).name) + (n < 0 ? ' licence has ended' : ' licence ends in ' + n + ' days'), meta:'Licence end date ' + fmt(l.end) + '.' + (l.renew === 'Yes' ? ' Renewal required.' : ''), when:'Owners' }); });
     if (S.owners) {
